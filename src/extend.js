@@ -1,6 +1,6 @@
 import assign from './assign';
 import ComputedProperty from './computed-property';
-import { eachProperty, reduceObject, mapObject } from './object-utils';
+import { eachProperty, reduceObject, mapObject, filterObject } from './object-utils';
 
 const { keys, defineProperty, getOwnPropertyDescriptors } = Object;
 
@@ -54,9 +54,19 @@ const Metadata = cached(class Metadata {
     //
     // merge in any existing properties on the prototype into this
     // state instance.
-    if (keys(this.ownProperties).length > 0) {
-      value = this.merge(this.ownProperties, value);
+
+    for (let metadata = this; metadata; metadata = metadata.supertype.metadata)  {
+      let constants = mapObject(metadata.constants, (k,v)=> v.value);
+      if (Object.keys(constants).length > 0) {
+        value = metadata.merge(constants, value);
+      }
     }
+
+    eachProperty(this.computeds, (key, descriptor)=> {
+      defineProperty(state, key, new ComputedProperty(function() {
+        return descriptor.get.call(this.valueOf());
+      }));
+    });
 
     // add a lazily computed property for each property of `value`
     keys(value).forEach((key)=> {
@@ -65,6 +75,38 @@ const Metadata = cached(class Metadata {
 
     // add the `valueOf`
     defineProperty(state, 'valueOf', new ValueOfMethod(this, value));
+  }
+
+  get computeds() {
+    let computeds = {};
+    for (let metadata = this; metadata; metadata = metadata.supertype.metadata)  {
+      computeds = reduceObject(metadata.descriptors, function(computeds, name, descriptor) {
+        if (descriptor.get) {
+          return assign({ [name]: descriptor }, computeds);
+        } else {
+          return computeds;
+        }
+      }, computeds);
+    }
+    return computeds;
+  }
+
+  get descriptors() {
+    let descriptors = getOwnPropertyDescriptors(this.definition);
+    return filterObject(descriptors, (key)=> key !== 'transitions');
+  }
+
+  /**
+   * @type {Object<PropertyDescriptor>}
+   */
+  get constants() {
+    return reduceObject(this.descriptors, function(constants, name, descriptor) {
+      if (descriptor.hasOwnProperty('value')) {
+        return assign({ [name]: descriptor }, constants);
+      } else {
+        return constants;
+      }
+    });
   }
 
   /**
@@ -139,18 +181,8 @@ const Metadata = cached(class Metadata {
    * @type {object}
    */
   get prototype() {
-    let descriptors = assign({}, this.ownTransitions);
+    let descriptors = assign({}, this.constants, this.ownTransitions);
     return Object.create(this.supertype.prototype, descriptors);
-  }
-
-  get ownProperties() {
-    return reduceObject(this.definition, function(properties, name, value) {
-      if (name === 'transitions') {
-        return properties;
-      } else {
-        return assign(properties, { [name]: value });
-      }
-    });
   }
 
   get ownTransitions() {

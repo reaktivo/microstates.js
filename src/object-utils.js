@@ -22,8 +22,55 @@ export function reduceObject(object, fn, result = {}) {
   return result;
 }
 
-export function eachProperty(object, fn) {
-  Object.keys(object).forEach(function(name) {
-    fn(name, object[name]);
+export function filterObject(object, fn) {
+  return reduceObject(object, function(results, name, value) {
+    if (fn(name, value)) {
+      return assign(results, { [name]: value });
+    } else {
+      return results;
+    }
   });
+}
+
+/**
+ * Iterates over all enumerable properties of an object, including
+ * those contained within its prototype chain, and invokes a callback
+ * for each key and value contained therein.
+ *
+ * The callback function will be invoked with both the name of the
+ * property and the property value:
+ *
+ *   eachProperty({hello: 'world'}, function(name, value) {
+ *     console.log(`${name} -> ${value}`);
+ *   });
+ *
+ *   //=> hello -> world
+ *
+ * Note: If the callback function does not consume the value, but only
+ * uses the name of the property, then it does not actually access
+ * that value. This is to allow lazy properties to remain
+ * un-computed.
+ *
+ * @param {Object} object - the object to walk
+ * @param {Function} fn - the callback
+ */
+export function eachProperty(object, fn) {
+  for (let holder = object; holder; holder = Object.getPrototypeOf(holder)) {
+    Object.keys(holder).forEach(function(name) {
+      let value;
+      if (fn.length > 1) {
+        value = holder[name];
+      }
+      fn.call(holder, name, value);
+    });
+  }
+}
+
+export function reduceChain(object, fn, result = {}) {
+  for (let holder = object; holder; holder = Object.getPrototypeOf(holder)) {
+    Object.keys(holder).forEach(function(name) {
+      result = fn.call(holder, result, name);
+    });
+  }
+  return result;
 }
